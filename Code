@@ -56,35 +56,38 @@ void loop() {
     float heartRate = pox.getHeartRate();
     float SpO2 = pox.getSpO2();
 
-    // Debug output to check if data is being updated
-    if (heartRate == 0 && SpO2 == 0) {
-      Serial.println("No valid data. Ensure finger is on the sensor.");
-      display.clearDisplay();
-      display.setCursor(0, 0);
-      display.println("Waiting for data...");
-      display.display();
-    } else {
-      // Print the values to Serial Monitor
+    // Only proceed if valid data is detected
+    if (heartRate > 40 && heartRate < 180) { // Basic range check for realistic BPM
+      // Apply a basic moving average filter to smooth out the heart rate
+      static float smoothedHeartRate = heartRate; // Initialize with the first reading
+      smoothedHeartRate = (0.9 * smoothedHeartRate) + (0.1 * heartRate); // Smoothing
+
+      // Serial output to monitor
       Serial.print("Heart Rate: ");
-      Serial.print(heartRate);
+      Serial.print(smoothedHeartRate);
       Serial.print(" BPM | SpO2: ");
       Serial.print(SpO2);
       Serial.println(" %");
 
-      // Display the values on the OLED screen
+      // Display smoothed values on the OLED screen
       display.clearDisplay();
       display.setCursor(0, 0);
       display.println("Pulse Oximeter");
       display.print("Heart Rate: ");
-      display.print(heartRate);
+      display.print(smoothedHeartRate);
       display.println(" BPM");
       display.print("SpO2: ");
       display.print(SpO2);
       display.println(" %");
+      display.display();
+    } else {
+      Serial.println("Invalid data. Ensure finger is on the sensor.");
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("Waiting for data...");
       display.display();
     }
   }
 
   delay(100); // Reduced delay for responsiveness
 }
-
