@@ -1,141 +1,90 @@
 #include <Wire.h>
-#include <MAX30100_PulseOximeter.h>
+#include "MAX30100_PulseOximeter.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <ESP8266WiFi.h>
-#include <ThingSpeak.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET -1
+#define OLED_RESET    -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-#define REPORTING_PERIOD_MS 1000
+#define REPORTING_PERIOD_MS 1000  // Time between data reporting (1 second)
 
-const char* ssid = "OPPO F9 Pro";
-const char* password = "98765432";
-unsigned long channelID = 2714017;
-const char* apiKey = "NSSCKFEATO8GFVQM";
-
-WiFiClient client;
 PulseOximeter pox;
 uint32_t tsLastReport = 0;
 
-// Variables to track repeated values
-float lastHeartRate = 0.0;
-float lastSpO2 = 0.0;
-bool isDataStuck = false;
-
 void setup() {
-    Serial.begin(115200);
+  Serial.begin(115200);
 
-    // Initialize WiFi
-    WiFi.begin(ssid, password);
-    Serial.print("Connecting to WiFi...");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println(" Connected to WiFi");
+  // Initialize the OLED display
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED display initialization failed");
+    while(true);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Initializing...");
+  display.display();
 
-    // Initialize ThingSpeak
-    ThingSpeak.begin(client);
-
-    // Initialize OLED display
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println("OLED display initialization failed");
-        while (true);
-    }
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println("Initializing...");
+  // Initialize the PulseOximeter sensor
+  Serial.println("Initializing pulse oximeter...");
+  if (!pox.begin()) {
+    Serial.println("FAILED to initialize pulse oximeter sensor");
+    display.println("Failed to initialize sensor!");
     display.display();
-
-    // Initialize PulseOximeter sensor
-    Serial.println("Initializing pulse oximeter...");
-    if (!pox.begin()) {
-        Serial.println("FAILED to initialize pulse oximeter sensor");
-        display.println("Failed to initialize sensor!");
-        display.display();
-        while (true);
-    } else {
-        Serial.println("Pulse oximeter initialized successfully");
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        display.println("Sensor ready...");
-        display.display();
-    }
+    while (true);
+  } else {
+    Serial.println("Pulse oximeter initialized successfully");
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("Sensor ready...");
+    display.display();
+  }
 }
 
 void loop() {
-    pox.update();  // Update the sensor data
+  // Update the sensor data
+  pox.update();
 
-    // Report sensor values every 1 second
-    if (millis() - tsLastReport > REPORTING_PERIOD_MS) {
-        tsLastReport = millis();
+  // Report the sensor values every 1 second
+  if (millis() - tsLastReport > REPORTING_PERIOD_MS) {
+    tsLastReport = millis();
 
-        // Get heart rate and SpO2 values
-        float heartRate = pox.getHeartRate();
-        float SpO2 = pox.getSpO2();
+    // Get the heart rate and SpO2 values
+    float heartRate = pox.getHeartRate();
+    float SpO2 = pox.getSpO2();
 
-        // Check for valid sensor data
-        if (heartRate <= 0 || SpO2 <= 0) {
-            Serial.println("Waiting for valid data...");
-            display.clearDisplay();
-            display.setCursor(0, 0);
-            display.println("Pulse Oximeter");
-            display.println("Waiting for data...");
-            display.display();
-        } else {
-            // Print values to Serial Monitor
-            Serial.print("Heart Rate: ");
-            Serial.print(heartRate);
-            Serial.print(" BPM | SpO2: ");
-            Serial.print(SpO2);
-            Serial.println(" %");
+    // Debug output to check if data is being updated
+    if (heartRate == 0 && SpO2 == 0) {
+      Serial.println("No valid data. Ensure finger is on the sensor.");
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("Waiting for data...");
+      display.display();
+    } else {
+      // Print the values to Serial Monitor
+      Serial.print("Heart Rate: ");
+      Serial.print(heartRate);
+      Serial.print(" BPM | SpO2: ");
+      Serial.print(SpO2);
+      Serial.println(" %");
 
-            // Display values on OLED screen
-            display.clearDisplay();
-            display.setCursor(0, 0);
-            display.println("Pulse Oximeter");
-            display.print("Heart Rate: ");
-            display.print(heartRate);
-            display.println(" BPM");
-            display.print("SpO2: ");
-            display.print(SpO2);
-            display.println(" %");
-            display.display();
-
-            // Detect if data is "stuck"
-            if (heartRate == lastHeartRate && SpO2 == lastSpO2) {
-                isDataStuck = true;
-                Serial.println("Data appears stuck. Resetting sensor...");
-                pox.begin(); // Reinitialize sensor if data is stuck
-            } else {
-                isDataStuck = false;
-            }
-
-            // Update last readings for the next loop
-            lastHeartRate = heartRate;
-            lastSpO2 = SpO2;
-
-            // Send data to ThingSpeak if data is fresh
-            if (!isDataStuck && WiFi.status() == WL_CONNECTED) {
-                ThingSpeak.setField(1, SpO2);
-                ThingSpeak.setField(2, heartRate);
-                int response = ThingSpeak.writeFields(channelID, apiKey);
-                if (response == 200) {
-                    Serial.println("Data sent to ThingSpeak successfully.");
-                } else {
-                    Serial.print("Error sending data to ThingSpeak. HTTP response code: ");
-                    Serial.println(response);
-                }
-            } else {
-                Serial.println("WiFi not connected or data was stale. Skipping ThingSpeak update.");
-            }
-        }
+      // Display the values on the OLED screen
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("Pulse Oximeter");
+      display.print("Heart Rate: ");
+      display.print(heartRate);
+      display.println(" BPM");
+      display.print("SpO2: ");
+      display.print(SpO2);
+      display.println(" %");
+      display.display();
     }
-    delay(100);  // Reduced delay for responsiveness
+  }
+
+  delay(100); // Reduced delay for responsiveness
 }
+
